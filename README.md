@@ -1,67 +1,28 @@
 # Pip-Compact
 
-An optimized, lightweight companion to Big Pip. Pip-Compact is a Pre-LayerNorm decoder-only transformer with satellite subnets, sized to train smoothly on a single 16 GB NVIDIA T4 in Kaggle or Google Colab without running out of memory.
+Pip-Compact is a ~90M-parameter Pip-style transformer for one 16GB T4. It is one self-contained training file (train.py) with a pure-Python byte-level BPE tokenizer, a Pre-LN transformer (SwiGLU or GELU MLP, tied embeddings), satellite subnets (endocrine, thalamus, hippocampus, router, critic), fp16 autocast, gradient accumulation, gradient checkpointing, and checkpoint/resume.
 
-## Kaggle or Colab: one-click start
+## One-command training
 
-1. Create a Kaggle notebook (or Colab) and set the accelerator to GPU T4.
-2. Run these cells:
-
-```bash
-!git clone https://github.com/coffee-hour/Pip-Compact.git
-%cd Pip-Compact
-!bash train.sh --fp16 --steps 5000
+```
+bash train.sh
 ```
 
-Notes:
-- Use `--fp16` on a T4. The T4 has no bfloat16 support, so `--bf16` is rejected there.
-- If you omit a precision flag, `train.sh` adds `--fp16` for you.
-- With no corpus present, `train.sh` downloads TinyShakespeare to `data/input.txt` as a default. To train on your own data, put a UTF-8 text file at `data/input.txt` or set `DATA=/path/to/file.txt`.
-- Checkpoints go to `out/ckpt.pt`, and the trained BPE tokenizer goes to `out/tokenizer.json`. To resume after a session ends, rerun with `--resume`.
+The launcher does the following:
+- installs torch if it is missing,
+- downloads TinyShakespeare to data/input.txt if the corpus is missing,
+- picks the device: CUDA, then MPS, then CPU,
+- uses fp16 autocast on CUDA and fp32 on MPS and CPU (fp16 needs CUDA),
+- resumes from out/ckpt.pt when that file exists.
+
+Extra flags are passed to train.py, for example `bash train.sh --steps 8000`.
 
 ## Files
 
-- `train.py`: self-contained trainer. It includes the pure-Python byte-level BPE tokenizer, the model, the satellite subnets, mixed precision, gradient accumulation, checkpointing, and sampling. It depends only on PyTorch.
-- `train.sh`: launcher. It checks for CUDA, fetches a default corpus if none is present, and defaults to `--fp16`.
-- `index.html`: zero-build browser architecture visualizer. Open it directly in a browser. It shows the parameter budget and a block diagram that updates as you change the config.
+- train.py: model, tokenizer, training loop, checkpointing, and sampling.
+- train.sh: the launcher above.
+- index.html: browser visualizer with subnets, telemetry, and a console preview.
 
-## Useful flags
+## Status
 
-- `--fp16` or `--bf16`: mixed precision (`--fp16` on T4).
-- `--batch` and `--accum`: micro-batch size and gradient accumulation steps. The effective batch is their product. Defaults are 8 and 4.
-- `--grad_ckpt`: activation checkpointing. Less VRAM, slower steps. Turn it on if you hit OOM.
-- `--ctx`: context length, default 512.
-- `--act swiglu|gelu`: MLP variant, default swiglu.
-- `--resume`: continue from `out/ckpt.pt`.
-
-## Architecture
-
-| Item | Value |
-|---|---|
-| Layers | 12 |
-| Attention heads | 12 (head dim 64) |
-| Width (n_embd) | 768 |
-| Context | 512 |
-| Vocabulary | 2048 (byte-level BPE; 256 byte tokens plus 1792 learned merges) |
-| Normalization | Pre-LayerNorm |
-| MLP | SwiGLU, hidden 2048 (or GELU, hidden 3072) |
-| Embeddings | Tied input embedding and LM head |
-| Total parameters | about 90.2M with the defaults |
-
-Block layout, in order:
-1. LayerNorm, then causal multi-head attention, scaled by a per-layer endocrine gain.
-2. Thalamus relay: a low-rank residual (768 to 48 to 768) that gates information flow.
-3. LayerNorm, then a router-gated MLP. A per-token sigmoid router scales the MLP output.
-
-Satellite subnets:
-- Endocrine: a linear map from the mean token state to per-layer, per-example gains (2 times sigmoid, mean 1 at init).
-- Thalamus: the low-rank relay inside each block.
-- Hippocampus: 16 learned memory slots that every position can attend to. Its output gate starts at zero, so it begins as an identity.
-- Router: a per-token gate on each MLP output.
-- Critic: an auxiliary head that predicts per-token cross-entropy. It adds 0.01 times MSE to the loss, and its input is detached from the LM loss path.
-
-Note on size: with this configuration (vocab 2048, width 768, 12 layers) the model has about 90M parameters, not 125M. A 125M model at this width and depth would need a larger vocabulary or more layers. The index.html visualizer shows the exact budget for any setting.
-
-## Memory
-
-At the defaults (micro-batch 8, context 512, fp16 autocast, AdamW), training is intended to fit on a 16 GB T4. This has not been measured on hardware yet. If you see OOM, lower `--batch`, raise `--accum` to keep the effective batch, or add `--grad_ckpt`.
+Code only. No pretrained weights are included.
