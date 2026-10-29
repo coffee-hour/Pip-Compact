@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pip-Compact one-command launcher.
-#   - Installs torch if it is missing.
+#   - Installs requirements.txt if torch or numpy is missing.
 #   - Downloads TinyShakespeare to data/input.txt if the corpus is missing.
 #   - Uses CUDA when present (fp16 autocast); otherwise fp32 on CPU or MPS.
 #   - Auto-resumes from out/ckpt.pt when it exists.
@@ -18,9 +18,9 @@ elif command -v python >/dev/null 2>&1; then PY=python
 else echo "ERROR: Python 3 not found." >&2; exit 1
 fi
 
-if ! "$PY" -c "import torch" >/dev/null 2>&1; then
-  echo "Installing PyTorch..."
-  "$PY" -m pip install -q torch
+if ! "$PY" -c "import torch, numpy" >/dev/null 2>&1; then
+  echo "Installing dependencies from requirements.txt..."
+  "$PY" -m pip install -q -r requirements.txt
 fi
 
 if [ ! -s "$DATA" ]; then
