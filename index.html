@@ -2,173 +2,158 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Pip-Compact | Architecture</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>pip-compact</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#0b0a09;--panel:#151310;--line:#2b2722;--amber:#f0a432;--amber-dim:#7a5319;--mono:#d8d4cc;--muted:#7d766c}
-*{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--mono);font:14px/1.5 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
-header{padding:24px 32px;border-bottom:1px solid var(--line)}
-h1{margin:0;font-size:20px;color:var(--amber);letter-spacing:.08em}
-header p{margin:6px 0 0;color:var(--muted)}
-main{display:grid;grid-template-columns:320px 1fr;gap:24px;padding:24px 32px}
-@media(max-width:860px){main{grid-template-columns:1fr}}
-.panel{background:var(--panel);border:1px solid var(--line);border-radius:6px;padding:18px}
-.panel h2{margin:0 0 12px;font-size:13px;color:var(--amber);text-transform:uppercase;letter-spacing:.12em}
-label{display:block;margin:10px 0 4px;color:var(--muted);font-size:12px}
-input,select{width:100%;background:var(--bg);color:var(--mono);border:1px solid var(--line);border-radius:4px;padding:7px 9px;font:inherit}
-input:focus,select:focus{outline:1px solid var(--amber-dim)}
-.stat{display:flex;justify-content:space-between;border-bottom:1px dashed var(--line);padding:6px 0}
-.stat b{color:var(--amber);font-weight:normal}
-.total{font-size:22px;color:var(--amber);margin:6px 0 10px}
-.warn{color:#e0792a;font-size:12px;margin-top:10px}
-svg{width:100%;height:auto;display:block}
-.note{color:var(--muted);font-size:12px;margin-top:12px}
+  :root { --bg: #000; --fg: #ececec; --mid: #8a8a8a; --dim: #4a4a4a; --line: #242424; --bubble: #141414; }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg); color: var(--fg);
+    font-family: "JetBrains Mono", ui-monospace, Menlo, Consolas, monospace;
+    font-size: 15px; line-height: 1.5;
+    display: flex; flex-direction: column; height: 100dvh;
+  }
+  header {
+    padding: 14px 20px; border-bottom: 1px solid var(--line);
+    display: flex; justify-content: space-between; align-items: baseline; gap: 12px;
+  }
+  header h1 { font-size: 15px; font-weight: 700; margin: 0; letter-spacing: 0.02em; }
+  #status { font-size: 12px; color: var(--mid); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #log {
+    flex: 1; overflow-y: auto; padding: 20px;
+    display: flex; flex-direction: column; gap: 12px;
+    max-width: 760px; width: 100%; margin: 0 auto;
+  }
+  .msg { max-width: 82%; padding: 10px 14px; border-radius: 16px; white-space: pre-wrap; word-wrap: break-word; }
+  .msg.you { align-self: flex-end; background: var(--fg); color: var(--bg); border-bottom-right-radius: 4px; }
+  .msg.pip { align-self: flex-start; background: var(--bubble); border: 1px solid var(--line); border-bottom-left-radius: 4px; }
+  .msg.sys { align-self: center; color: var(--mid); font-size: 13px; }
+  .empty { margin: auto; color: var(--dim); text-align: center; font-size: 14px; }
+  form {
+    border-top: 1px solid var(--line); padding: 12px 20px calc(12px + env(safe-area-inset-bottom));
+    display: flex; gap: 10px; max-width: 760px; width: 100%; margin: 0 auto;
+  }
+  #input {
+    flex: 1; min-width: 0; background: var(--bg); color: var(--fg);
+    border: 1px solid var(--dim); border-radius: 999px; padding: 10px 16px; font: inherit; outline: none;
+  }
+  #input:focus { border-color: var(--mid); }
+  #input::placeholder { color: var(--dim); }
+  button {
+    background: var(--fg); color: var(--bg); border: 0; border-radius: 999px;
+    padding: 10px 18px; font: inherit; font-weight: 700; cursor: pointer;
+  }
+  button:disabled { background: var(--dim); color: var(--bg); cursor: default; }
+  @media (max-width: 480px) {
+    body { font-size: 14px; }
+    .msg { max-width: 90%; }
+    header, #log, form { padding-left: 14px; padding-right: 14px; }
+  }
 </style>
 </head>
 <body>
+
 <header>
-  <h1>PIP-COMPACT</h1>
-  <p>Pre-LN transformer, tied embeddings, five satellite subnets. Static architecture visualizer. Training runs in train.py, not in this page.</p>
+  <h1>pip-compact</h1>
+  <div id="status">connecting...</div>
 </header>
-<main>
-  <section class="panel">
-    <h2>Config</h2>
-    <label for="vocab">vocab</label><input id="vocab" type="number" value="2048">
-    <label for="ctx">context</label><input id="ctx" type="number" value="512">
-    <label for="layers">layers</label><input id="layers" type="number" value="12">
-    <label for="heads">heads</label><input id="heads" type="number" value="12">
-    <label for="dim">width (n_embd)</label><input id="dim" type="number" value="768">
-    <label for="act">MLP</label>
-    <select id="act"><option value="swiglu" selected>SwiGLU</option><option value="gelu">GELU</option></select>
-    <div class="warn" id="warn"></div>
-    <div class="note">Changing these values recomputes the parameter budget and the diagram. It does not change any training run.</div>
-  </section>
-  <section>
-    <div class="panel">
-      <h2>Parameter budget</h2>
-      <div class="total" id="total"></div>
-      <div id="stats"></div>
-      <div class="note" id="mem"></div>
-    </div>
-    <div class="panel" style="margin-top:24px">
-      <h2>Architecture</h2>
-      <svg id="diagram" viewBox="0 0 760 620" role="img" aria-label="Pip-Compact architecture"></svg>
-    </div>
-  </section>
-</main>
+
+<div id="log">
+  <div class="empty" id="empty">A ~125M parameter transformer. Replies come from the local server.</div>
+</div>
+
+<form id="form" autocomplete="off">
+  <input id="input" type="text" placeholder="Message Pip" maxlength="400" aria-label="Message Pip">
+  <button id="send" type="submit" disabled>Send</button>
+</form>
+
 <script>
-const $ = id => document.getElementById(id);
-const fmt = n => n.toLocaleString('en-US');
-const NS = 'http://www.w3.org/2000/svg';
+(() => {
+  const logEl = document.getElementById('log');
+  const form = document.getElementById('form');
+  const input = document.getElementById('input');
+  const sendBtn = document.getElementById('send');
+  const statusEl = document.getElementById('status');
+  let emptyEl = document.getElementById('empty');
+  let busy = false;
 
-function calc() {
-  const V = +$('vocab').value, T = +$('ctx').value, L = +$('layers').value;
-  const C = +$('dim').value, H = +$('heads').value, act = $('act').value;
-  const warn = [];
-  if (C % H) warn.push('width must be divisible by heads');
-  if (C % 16) warn.push('width should be divisible by 16 (relay bottleneck)');
-  $('warn').textContent = warn.join(' | ');
-  const FF = act === 'swiglu' ? Math.floor(8 * C / 3 / 64) * 64 : 4 * C;
-  const mlpMats = act === 'swiglu' ? 3 : 2;
-  const parts = {
-    'Token embedding (tied with LM head)': V * C,
-    'Position embedding': T * C,
-    'Attention (qkv + proj)': L * 4 * C * C,
-    'MLP (' + act + ', hidden ' + FF + ')': L * mlpMats * C * FF,
-    'Thalamus relay (low-rank)': L * 2 * C * (C / 16),
-    'Router (per-token gate)': L * (C + 1),
-    'LayerNorms (block)': L * 4 * C,
-    'Endocrine gains': C * L + L,
-    'Hippocampus memory': 16 * C + 4 * C * C + 18 * C + 1,
-    'Final LayerNorm': 2 * C,
-    'Critic head': C + 1
-  };
-  const total = Object.values(parts).reduce((a, b) => a + b, 0);
-  return { parts, total, C, L, V, T, H, FF, act };
-}
-
-function render() {
-  const r = calc();
-  $('total').textContent = (r.total / 1e6).toFixed(2) + 'M parameters';
-  $('stats').innerHTML = Object.entries(r.parts).map(([k, v]) =>
-    '<div class="stat"><span>' + k + '</span><b>' + fmt(v) + '</b></div>').join('');
-  const gib = (r.total * 16) / 2 ** 30;
-  $('mem').textContent = 'Estimated training state (fp32 weights, grads, AdamW): ' + gib.toFixed(2) +
-    ' GiB before activations. Activations grow with batch x context; use --grad_ckpt and a smaller --batch if needed on a 16 GB T4.';
-  drawDiagram(r);
-}
-
-function box(g, x, y, w, h, label, sub, stroke) {
-  const r = document.createElementNS(NS, 'rect');
-  r.setAttribute('x', x); r.setAttribute('y', y); r.setAttribute('width', w); r.setAttribute('height', h);
-  r.setAttribute('rx', 5); r.setAttribute('fill', '#151310'); r.setAttribute('stroke', stroke || '#2b2722');
-  g.appendChild(r);
-  const t = document.createElementNS(NS, 'text');
-  t.setAttribute('x', x + w / 2); t.setAttribute('y', y + h / 2 - (sub ? 4 : -4));
-  t.setAttribute('text-anchor', 'middle'); t.setAttribute('fill', '#d8d4cc'); t.setAttribute('font-size', 13);
-  t.textContent = label; g.appendChild(t);
-  if (sub) {
-    const s = document.createElementNS(NS, 'text');
-    s.setAttribute('x', x + w / 2); s.setAttribute('y', y + h / 2 + 12);
-    s.setAttribute('text-anchor', 'middle'); s.setAttribute('fill', '#7d766c'); s.setAttribute('font-size', 11);
-    s.textContent = sub; g.appendChild(s);
+  function addMsg(cls, text) {
+    if (emptyEl) { emptyEl.remove(); emptyEl = null; }
+    const d = document.createElement('div');
+    d.className = 'msg ' + cls;
+    d.textContent = text;
+    logEl.appendChild(d);
+    logEl.scrollTop = logEl.scrollHeight;
+    return d;
   }
-}
 
-function arrow(g, x1, y1, x2, y2) {
-  const l = document.createElementNS(NS, 'line');
-  l.setAttribute('x1', x1); l.setAttribute('y1', y1); l.setAttribute('x2', x2); l.setAttribute('y2', y2);
-  l.setAttribute('stroke', '#7a5319'); l.setAttribute('stroke-width', 1.5); g.appendChild(l);
-}
-
-function drawDiagram(r) {
-  const svg = $('diagram');
-  svg.innerHTML = '';
-  const g = document.createElementNS(NS, 'g');
-  svg.appendChild(g);
-  const cx = 380;
-  box(g, cx - 130, 10, 260, 40, 'Token + position embed', 'vocab ' + r.V + ', ctx ' + r.T, '#f0a432');
-  arrow(g, cx, 50, cx, 70);
-  box(g, cx - 130, 70, 260, 34, 'Endocrine', 'per-layer hormone gains, ' + r.L + ' channels');
-  arrow(g, cx, 104, cx, 118);
-  // one block, drawn with a stacked preview of up to 12 layers
-  const shown = Math.min(r.L, 3);
-  const blockH = 150;
-  let y = 118;
-  for (let i = 0; i < shown; i++) {
-    const outer = document.createElementNS(NS, 'rect');
-    outer.setAttribute('x', cx - 170); outer.setAttribute('y', y); outer.setAttribute('width', 340);
-    outer.setAttribute('height', blockH); outer.setAttribute('rx', 8); outer.setAttribute('fill', 'none');
-    outer.setAttribute('stroke', '#7a5319'); outer.setAttribute('stroke-dasharray', '4 3'); g.appendChild(outer);
-    const lbl = document.createElementNS(NS, 'text');
-    lbl.setAttribute('x', cx - 160); lbl.setAttribute('y', y + 16); lbl.setAttribute('fill', '#7d766c');
-    lbl.setAttribute('font-size', 11); lbl.textContent = 'block ' + (i + 1) + ' of ' + r.L; g.appendChild(lbl);
-    box(g, cx - 150, y + 24, 300, 26, 'LN, then ' + r.H + '-head causal attention', 'x + g_layer * attn(LN(x))');
-    box(g, cx - 150, y + 58, 300, 26, 'Thalamus relay', 'x + up(GELU(down(LN(x))))');
-    box(g, cx - 150, y + 92, 300, 26, 'LN, then router-gated MLP', 'x + sigmoid(route(x)) * ' + r.act + '(LN(x))');
-    y += blockH + 16;
+  async function loadStatus() {
+    try {
+      const res = await fetch('/api/status');
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      const s = await res.json();
+      statusEl.textContent = 'pip-compact | ' + (s.params ? (s.params / 1e6).toFixed(0) + 'M params' : 'ready');
+      sendBtn.disabled = false;
+    } catch (e) {
+      statusEl.textContent = 'no model server';
+      addMsg('sys', 'No model is connected to this page yet, so Pip cannot reply.');
+    }
   }
-  if (r.L > shown) {
-    const more = document.createElementNS(NS, 'text');
-    more.setAttribute('x', cx); more.setAttribute('y', y - 4); more.setAttribute('text-anchor', 'middle');
-    more.setAttribute('fill', '#7d766c'); more.setAttribute('font-size', 12);
-    more.textContent = '... ' + (r.L - shown) + ' more identical blocks ...';
-    g.appendChild(more);
-    y += 14;
-  }
-  arrow(g, cx, y, cx, y + 14);
-  box(g, cx - 130, y + 14, 260, 34, 'Hippocampus', '16 learned memory slots, gated');
-  arrow(g, cx, y + 48, cx, y + 62);
-  box(g, cx - 130, y + 62, 260, 30, 'Final LayerNorm');
-  arrow(g, cx, y + 92, cx, y + 106);
-  box(g, cx - 130, y + 106, 125, 40, 'LM head', 'tied to embedding', '#f0a432');
-  box(g, cx + 5, y + 106, 125, 40, 'Critic', 'predicts per-token loss');
-  svg.setAttribute('viewBox', '0 0 760 ' + (y + 170));
-}
 
-['vocab', 'ctx', 'layers', 'heads', 'dim', 'act'].forEach(id => $(id).addEventListener('input', render));
-render();
+  async function send() {
+    const msg = input.value.trim();
+    if (!msg || busy) return;
+    input.value = '';
+    busy = true;
+    sendBtn.disabled = true;
+    addMsg('you', msg);
+    const node = addMsg('pip', '');
+    try {
+      const res = await fetch('/api/chat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: msg }),
+      });
+      if (!res.ok) { node.textContent = '[HTTP ' + res.status + ']'; return; }
+      const reader = res.body.getReader();
+      const dec = new TextDecoder();
+      let buf = '';
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buf += dec.decode(value, { stream: true });
+        let i;
+        while ((i = buf.indexOf('\n\n')) >= 0) {
+          const block = buf.slice(0, i);
+          buf = buf.slice(i + 2);
+          let ev = 'message', data = '';
+          for (const line of block.split('\n')) {
+            if (line.startsWith('event: ')) ev = line.slice(7);
+            else if (line.startsWith('data: ')) data += line.slice(6);
+          }
+          if (!data) continue;
+          const d = JSON.parse(data);
+          if (ev === 'token') node.textContent += d.text;
+          else if (ev === 'error') node.textContent += '\n[error: ' + d.message + ']';
+        }
+        logEl.scrollTop = logEl.scrollHeight;
+      }
+    } catch (e) {
+      node.textContent += '[could not reach the model: ' + e.message + ']';
+    } finally {
+      busy = false;
+      sendBtn.disabled = false;
+      input.focus();
+    }
+  }
+
+  form.addEventListener('submit', (e) => { e.preventDefault(); send(); });
+  loadStatus();
+  input.focus();
+})();
 </script>
 </body>
 </html>
