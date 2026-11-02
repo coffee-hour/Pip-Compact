@@ -88,7 +88,7 @@ Satellite subnets:
 - Router: a per-token gate on each MLP output.
 - Critic: an auxiliary head that predicts per-token cross-entropy. It adds 0.01 times MSE to the loss, and its input is detached from the LM loss path.
 
-Note on size: with this configuration (vocab 2048, width 768, 12 layers) the model has about 90M parameters, not 125M. A 125M model at this width and depth would need a larger vocabulary or more layers. The index.html visualizer shows the exact budget for any setting.
+Note on size: with this configuration (vocab 2048, width 768, 12 layers) the model has about 90M parameters, not 125M. A 125M model at this width and depth would need a larger vocabulary or more layers.
 
 ## Memory
 
@@ -100,7 +100,7 @@ At the defaults (micro-batch 8, context 512, fp16 autocast, AdamW), training is 
 - `train.sh`: one-command launcher. It installs torch if needed, fetches a default corpus if none is present, selects the device, and resumes automatically.
 - `chat.py`: interactive terminal chat. It loads `out/ckpt.pt` and `out/tokenizer.json` and streams replies.
 - `server.py`: standard-library HTTP server that serves the web UI and the chat API.
-- `index.html`: zero-build browser page in the Obsidian and Monochrome palette. It chats through `server.py`, and its architecture visualizer shows the parameter budget and block diagram for the current config.
+- `index.html`: zero-build browser chat page in the Obsidian and Monochrome palette (#0a0a0a background, #ffffff accents, #737373 text). It talks to `server.py` and has no external assets.
 - `scripts/upload_weights.sh`: uploads or downloads weights via GitHub Releases.
 - `download_chat_data.sh`: fetches chat data for training.
 - `.gitignore`: keeps `out/`, `data/`, and checkpoints out of git.
