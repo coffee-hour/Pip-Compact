@@ -9,9 +9,14 @@ Decoding is byte-safe: an incremental UTF-8 decoder holds back partial multi-byt
 sequences until they complete, and any replacement characters are stripped before
 they reach the screen or the chat history.
 
+With --web, each user turn is preceded by live DuckDuckGo results (see web_search.py,
+standard library only, no API keys). Search text is added to that turn's prompt only;
+the chat history keeps the bare conversation.
+
 Usage:
     python chat.py
     python chat.py --ckpt out/ckpt.pt --tokenizer out/tokenizer.json --max_tokens 200
+    python chat.py --web --web_results 3
 
 Commands inside the loop: /reset clears history, /quit exits.
 """
@@ -130,6 +135,16 @@ def stream_reply(model, tok, device, prompt, max_tokens=200, temp=0.8, top_k=40,
         yield chunk
 
 
+def build_prompt(history, user, web_context=""):
+    """Return (prompt_for_model, bare_turn). Web context, if any, goes only into the prompt."""
+    bare_turn = history + f"User: {user}\nAssistant:"
+    if web_context:
+        prompt = history + f"Web search results:\n{web_context}\n\nUser: {user}\nAssistant:"
+    else:
+        prompt = bare_turn
+    return prompt, bare_turn
+
+
 def main():
     ap = argparse.ArgumentParser(description="Chat with Pip-Compact in the terminal")
     ap.add_argument("--ckpt", default="out/ckpt.pt")
@@ -139,11 +154,18 @@ def main():
     ap.add_argument("--top_k", type=int, default=40)
     ap.add_argument("--top_p", type=float, default=0.9)
     ap.add_argument("--rep_penalty", type=float, default=1.15, help="1.0 disables")
+    ap.add_argument("--web", action="store_true", help="inject live DuckDuckGo results into each prompt")
+    ap.add_argument("--web_results", type=int, default=3, help="number of search results to inject")
     a = ap.parse_args()
+
+    fetch_context = None
+    if a.web:
+        from web_search import fetch_context  # stdlib only; imported only when requested
 
     model, tok, device = load(a.ckpt, a.tokenizer)
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
-    print(f"Pip-Compact ({n_params:.1f}M params) on {device}. /reset clears history, /quit exits.")
+    web_note = " Web search on." if a.web else ""
+    print(f"Pip-Compact ({n_params:.1f}M params) on {device}.{web_note} /reset clears history, /quit exits.")
 
     history = ""
     while True:
@@ -161,7 +183,8 @@ def main():
             print("(history cleared)")
             continue
 
-        prompt = history + f"User: {user}\nAssistant:"
+        web_context = fetch_context(user, max_results=a.web_results) if a.web else ""
+        prompt, bare_turn = build_prompt(history, user, web_context)
         print("Assistant: ", end="", flush=True)
         parts = []
         for chunk in stream_reply(model, tok, device, prompt, max_tokens=a.max_tokens,
@@ -171,7 +194,7 @@ def main():
             print(chunk, end="", flush=True)
         print()
         reply = "".join(parts).replace(REPLACEMENT, "").rstrip()
-        history = prompt + " " + reply + "\n"
+        history = bare_turn + " " + reply + "\n"
 
 
 if __name__ == "__main__":
