@@ -25,11 +25,33 @@ Notes:
 - With no corpus present, `train.sh` downloads TinyShakespeare to `data/input.txt`. To train on your own data, put a UTF-8 text file at `data/input.txt` or set `DATA=/path/to/file.txt`.
 - Checkpoints go to `out/ckpt.pt`, and the trained BPE tokenizer goes to `out/tokenizer.json`. `train.sh` resumes from `out/ckpt.pt` automatically when that file exists.
 
-## Files
+## Chat with Pip
 
-- `train.py`: self-contained trainer. It includes the pure-Python byte-level BPE tokenizer, the model, the satellite subnets, mixed precision, gradient accumulation, checkpointing, and sampling. It depends only on PyTorch.
-- `train.sh`: one-command launcher. It installs torch if needed, fetches a default corpus if none is present, selects the device, and resumes automatically.
-- `index.html`: zero-build browser architecture visualizer. Open it directly in a browser. It shows the parameter budget and a block diagram that updates as you change the config.
+After training (or after downloading released weights, see below), chat in the terminal:
+
+```bash
+python chat.py                      # /reset clears history, /quit exits
+python chat.py --max_tokens 300 --temp 0.7
+```
+
+For the browser UI, start the local server and open the page:
+
+```bash
+python server.py --port 8000        # then open http://127.0.0.1:8000
+```
+
+`server.py` uses only the Python standard library (plus torch, already needed for training). It serves `index.html`, a `GET /api/status` endpoint, and a `POST /api/chat` endpoint that streams tokens as Server-Sent Events. Requests are handled one at a time.
+
+## Weights: GitHub Releases
+
+GitHub rejects single files over 100 MB, so `out/ckpt.pt` is kept out of git (see `.gitignore`) and published as a release asset instead. The GitHub CLI (`gh`) is required, and you need to run `gh auth login` once.
+
+```bash
+bash scripts/upload_weights.sh upload v0.1     # publishes out/ckpt.pt and out/tokenizer.json
+bash scripts/upload_weights.sh download v0.1   # fetches them into out/ for chat.py or server.py
+```
+
+The upload is equivalent to `gh release create v0.1 out/ckpt.pt out/tokenizer.json --repo coffee-hour/Pip-Compact`. If the release already exists, the script replaces its assets.
 
 ## Useful flags
 
@@ -71,3 +93,14 @@ Note on size: with this configuration (vocab 2048, width 768, 12 layers) the mod
 ## Memory
 
 At the defaults (micro-batch 8, context 512, fp16 autocast, AdamW), training is intended to fit on a 16 GB T4. This has not been measured on hardware yet. If you see OOM, lower `--batch`, raise `--accum` to keep the effective batch, or add `--grad_ckpt`.
+
+## Files
+
+- `train.py`: self-contained trainer. It includes the pure-Python byte-level BPE tokenizer, the model, the satellite subnets, mixed precision, gradient accumulation, checkpointing, and sampling. It depends only on PyTorch.
+- `train.sh`: one-command launcher. It installs torch if needed, fetches a default corpus if none is present, selects the device, and resumes automatically.
+- `chat.py`: interactive terminal chat. It loads `out/ckpt.pt` and `out/tokenizer.json` and streams replies.
+- `server.py`: standard-library HTTP server that serves the web UI and the chat API.
+- `index.html`: zero-build browser page in the Obsidian and Monochrome palette. It chats through `server.py`, and its architecture visualizer shows the parameter budget and block diagram for the current config.
+- `scripts/upload_weights.sh`: uploads or downloads weights via GitHub Releases.
+- `download_chat_data.sh`: fetches chat data for training.
+- `.gitignore`: keeps `out/`, `data/`, and checkpoints out of git.
