@@ -21,7 +21,12 @@ if ! "$PY" -c "import datasets" >/dev/null 2>&1; then
   "$PY" -m pip install -q datasets || { echo "ERROR: failed to install datasets." >&2; exit 1; }
 fi
 
-hash_file() { if [ -s "$1" ]; then sha256sum "$1" 2>/dev/null | cut -d' ' -f1 || shasum -a 256 "$1" | cut -d' ' -f1; else echo none; fi; }
+hash_file() {
+  if [ ! -s "$1" ]; then echo none; return; fi
+  if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1
+  else shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
 BEFORE=$(hash_file "$DATA")
 
 mkdir -p "$(dirname "$DATA")"
