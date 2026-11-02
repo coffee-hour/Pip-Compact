@@ -5,6 +5,10 @@ Loads out/ckpt.pt and out/tokenizer.json, then runs a terminal loop. Each turn i
 formatted as "User: <msg>\nAssistant:" and the reply streams token by token until
 the model writes a "\nUser:" stop sequence or --max_tokens is reached.
 
+Decoding is byte-safe: an incremental UTF-8 decoder holds back partial multi-byte
+sequences until they complete, and any replacement characters are stripped before
+they reach the screen or the chat history.
+
 Usage:
     python chat.py
     python chat.py --ckpt out/ckpt.pt --tokenizer out/tokenizer.json --max_tokens 200
@@ -12,13 +16,16 @@ Usage:
 Commands inside the loop: /reset clears history, /quit exits.
 """
 import argparse
+import codecs
+from dataclasses import fields
 
 import torch
-import torch.nn.functional as F
 
 from train import Pip, Config, BPE
 
 STOP = "\nUser:"
+REPLACEMENT = "\ufffd"
+REP_WINDOW = 256  # only the most recent reply tokens are penalized
 
 
 def pick_device():
@@ -29,66 +36,96 @@ def load(ckpt_path="out/ckpt.pt", tok_path="out/tokenizer.json", device=None):
     """Return (model, tokenizer, device) ready for inference."""
     device = device or pick_device()
     ck = torch.load(ckpt_path, map_location=device, weights_only=False)
-    cfg = Config(**ck["cfg"])
+    known = {f.name for f in fields(Config)}
+    cfg = Config(**{k: v for k, v in ck["cfg"].items() if k in known})
     model = Pip(cfg)
     model.load_state_dict(ck["model"])
     model.eval()
     model.to(device)
     tok = BPE.load(tok_path)
+    if tok.n_vocab != cfg.vocab:
+        raise ValueError(f"tokenizer vocab {tok.n_vocab} does not match checkpoint vocab {cfg.vocab}")
     return model, tok, device
 
 
+def sample_token(logits, recent, temp, top_k, top_p, rep_penalty):
+    """Pick one token id from a 1-D logits tensor.
+
+    Applies a repetition penalty to tokens in `recent`, then temperature, top-k and top-p.
+    temp <= 0 means greedy decoding.
+    """
+    logits = logits.float().clone()
+    if rep_penalty != 1.0 and recent:
+        idx = torch.tensor(sorted(set(recent)), dtype=torch.long, device=logits.device)
+        vals = logits[idx]
+        logits[idx] = torch.where(vals > 0, vals / rep_penalty, vals * rep_penalty)
+    if temp <= 0:
+        return int(torch.argmax(logits).item())
+    logits = logits / temp
+    if top_k and top_k > 0:
+        v, _ = torch.topk(logits, min(top_k, logits.numel()))
+        logits[logits < v[-1]] = float("-inf")
+    probs = torch.softmax(logits, dim=-1)
+    if 0 < top_p < 1.0:
+        sp, si = torch.sort(probs, descending=True)
+        cum = torch.cumsum(sp, dim=0)
+        sp[(cum - sp) > top_p] = 0.0  # keep the smallest set whose mass reaches top_p
+        probs = torch.zeros_like(probs).scatter_(0, si, sp)
+        probs = probs / probs.sum()
+    return int(torch.multinomial(probs, 1).item())
+
+
 @torch.no_grad()
-def stream_reply(model, tok, device, prompt, max_tokens=200, temp=0.8, top_k=40):
-    """Yield text chunks of the reply as they are generated.
+def stream_reply(model, tok, device, prompt, max_tokens=200, temp=0.8, top_k=40,
+                 top_p=0.9, rep_penalty=1.15):
+    """Yield clean text chunks of the reply as they are generated.
 
     Stops when the decoded reply contains STOP or after max_tokens tokens. A short
     tail is held back so a partial STOP sequence is never printed.
     """
     ids = tok.encode(prompt) or [0]
-    gen = []
-    emitted = 0
-    started = False
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    reply_ids = []
+    text = ""          # decoded reply so far (only complete characters)
+    emitted = 0        # how much of `text` has been yielded
+    started = False    # whether any non-whitespace text has been yielded
+
+    def take(chunk):
+        nonlocal started
+        chunk = chunk.replace(REPLACEMENT, "")
+        if not started:
+            chunk = chunk.lstrip()
+        if chunk.strip():
+            started = True
+        return chunk
+
     for _ in range(max_tokens):
         window = torch.tensor([ids[-model.cfg.ctx:]], dtype=torch.long, device=device)
         logits, _, _ = model(window)
-        logits = logits[:, -1].float() / temp
-        v, _ = torch.topk(logits, min(top_k, logits.size(-1)))
-        logits[logits < v[:, [-1]]] = float("-inf")
-        nxt = torch.multinomial(F.softmax(logits, dim=-1), 1).item()
+        nxt = sample_token(logits[0, -1], reply_ids[-REP_WINDOW:], temp, top_k, top_p, rep_penalty)
         ids.append(nxt)
-        gen.append(nxt)
+        reply_ids.append(nxt)
+        text += decoder.decode(tok.vocab[nxt])  # holds partial UTF-8 until complete
 
-        full = tok.decode(gen)
-        if full.endswith("\ufffd"):  # incomplete UTF-8 sequence, wait for more bytes
-            continue
-        stop_at = full.find(STOP)
+        stop_at = text.find(STOP)
         if stop_at != -1:
-            chunk = full[emitted:stop_at]
-            if not started:
-                chunk = chunk.lstrip()
+            chunk = take(text[emitted:stop_at])
             if chunk:
                 yield chunk
             return
-        safe = len(full) - (len(STOP) - 1)
+        safe = len(text) - (len(STOP) - 1)
         if safe > emitted:
-            chunk = full[emitted:safe]
-            if not started:
-                chunk = chunk.lstrip()
-            if chunk.strip():
-                started = True
+            chunk = take(text[emitted:safe])
             emitted = safe
             if chunk:
                 yield chunk
 
-    # flush whatever is left (end of budget or trailing invalid bytes)
-    full = tok.decode(gen)
-    cut = full.find(STOP)
-    if cut != -1:
-        full = full[:cut]
-    chunk = full[emitted:]
-    if not started:
-        chunk = chunk.lstrip()
+    # end of budget: flush any incomplete trailing bytes and the held-back tail
+    text += decoder.decode(b"", final=True)
+    stop_at = text.find(STOP)
+    if stop_at != -1:
+        text = text[:stop_at]
+    chunk = take(text[emitted:])
     if chunk:
         yield chunk
 
@@ -98,8 +135,10 @@ def main():
     ap.add_argument("--ckpt", default="out/ckpt.pt")
     ap.add_argument("--tokenizer", default="out/tokenizer.json")
     ap.add_argument("--max_tokens", type=int, default=200)
-    ap.add_argument("--temp", type=float, default=0.8)
+    ap.add_argument("--temp", type=float, default=0.8, help="0 = greedy")
     ap.add_argument("--top_k", type=int, default=40)
+    ap.add_argument("--top_p", type=float, default=0.9)
+    ap.add_argument("--rep_penalty", type=float, default=1.15, help="1.0 disables")
     a = ap.parse_args()
 
     model, tok, device = load(a.ckpt, a.tokenizer)
@@ -125,12 +164,13 @@ def main():
         prompt = history + f"User: {user}\nAssistant:"
         print("Assistant: ", end="", flush=True)
         parts = []
-        for chunk in stream_reply(model, tok, device, prompt,
-                                  max_tokens=a.max_tokens, temp=a.temp, top_k=a.top_k):
+        for chunk in stream_reply(model, tok, device, prompt, max_tokens=a.max_tokens,
+                                  temp=a.temp, top_k=a.top_k, top_p=a.top_p,
+                                  rep_penalty=a.rep_penalty):
             parts.append(chunk)
             print(chunk, end="", flush=True)
         print()
-        reply = "".join(parts).rstrip()
+        reply = "".join(parts).replace(REPLACEMENT, "").rstrip()
         history = prompt + " " + reply + "\n"
 
 
