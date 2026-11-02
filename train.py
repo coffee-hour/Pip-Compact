@@ -6,7 +6,7 @@ Single self-contained file: pure-Python byte-level BPE tokenizer, Pre-LN transfo
 hippocampus, router, critic), fp16/bf16 autocast, gradient accumulation,
 gradient checkpointing, checkpoint/resume.
 """
-import argparse, contextlib, json, math, os, re, time
+import argparse, contextlib, hashlib, json, math, os, re, time
 from collections import Counter
 from dataclasses import dataclass, asdict
 
@@ -248,6 +248,14 @@ def get_batch(data, B, T, device):
     return x.to(device, non_blocking=True), y.to(device, non_blocking=True)
 
 
+def corpus_key(text, tok):
+    """Fingerprint of the corpus and tokenizer. Cached token ids are valid only if this matches."""
+    h = hashlib.sha256()
+    h.update(text.encode("utf-8", errors="surrogatepass"))
+    h.update(json.dumps(tok.merges).encode("utf-8"))
+    return h.hexdigest()
+
+
 @torch.no_grad()
 def evaluate(model, data, a, cfg, device, amp_fn):
     model.eval()
@@ -344,12 +352,19 @@ def main():
         print(f"training BPE on {min(len(text), a.tok_chars)} chars, target vocab {a.vocab}")
         tok = BPE.train(text[:a.tok_chars], a.vocab)
         tok.save(tok_path)
+    # Token cache is reused only if the corpus and tokenizer still match what built it.
     cache = os.path.join(a.out, "tokens.pt")
+    key = corpus_key(text, tok)
+    ids = None
     if os.path.exists(cache):
-        ids = torch.load(cache)
-    else:
+        cached = torch.load(cache, weights_only=False)
+        if isinstance(cached, dict) and cached.get("key") == key:
+            ids = cached["ids"]
+        else:
+            print("token cache is stale (corpus or tokenizer changed); re-encoding")
+    if ids is None:
         ids = torch.tensor(tok.encode(text), dtype=torch.long)
-        torch.save(ids, cache)
+        torch.save({"key": key, "ids": ids}, cache)
     n = int(0.9 * len(ids))
     train_ids, val_ids = ids[:n], ids[n:]
     print(f"tokens: {len(ids):,} (train {len(train_ids):,}, val {len(val_ids):,}), vocab {tok.n_vocab}")
