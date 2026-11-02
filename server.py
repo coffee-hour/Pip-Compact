@@ -8,6 +8,9 @@ Serves index.html at / and exposes:
                          event: error  data: {"message": "..."}
                          event: done   data: {}
 
+Generation uses the same byte-safe decoder as chat.py. Replies are never stored
+server-side, so no replacement characters can leak into later turns.
+
 Usage:
     python server.py --port 8000
     then open http://127.0.0.1:8000
@@ -22,6 +25,9 @@ from chat import load, stream_reply
 
 MAX_MSG = 400
 HERE = os.path.dirname(os.path.abspath(__file__))
+
+# Sampling defaults for the web UI. Kept explicit so they match chat.py's CLI defaults.
+GEN_KW = dict(max_tokens=200, temp=0.8, top_k=40, top_p=0.9, rep_penalty=1.15)
 
 MODEL = None
 TOK = None
@@ -88,7 +94,7 @@ class Handler(BaseHTTPRequestHandler):
         prompt = f"User: {message}\nAssistant:"
         try:
             with LOCK:
-                for chunk in stream_reply(MODEL, TOK, DEVICE, prompt):
+                for chunk in stream_reply(MODEL, TOK, DEVICE, prompt, **GEN_KW):
                     self._sse("token", {"text": chunk})
             self._sse("done", {})
         except (BrokenPipeError, ConnectionResetError):
