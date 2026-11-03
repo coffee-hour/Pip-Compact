@@ -1,9 +1,10 @@
 #!/usr/bin/env bash
-# Build the UltraChat dialog corpus at data/input.txt and wipe out/ if it changed.
+# Build the curated UltraChat dialog corpus at data/input.txt and wipe out/ if it changed.
 #   - Installs the 'datasets' package if it is missing.
-#   - Runs scripts/prep_dialog.py to stream HuggingFaceH4/ultrachat_200k.
+#   - Runs scripts/prep_dialog_curated.py to stream HuggingFaceH4/ultrachat_200k with quality filters,
+#     prepending data/curated_seed.txt when present.
 #   - If the corpus content changed, deletes out/ so the tokenizer and checkpoints are rebuilt.
-# Usage: bash download_chat_data.sh [prep_dialog.py flags, e.g. --max-conversations 5000]
+# Usage: bash download_chat_data.sh [prep_dialog_curated.py flags, e.g. --max-conversations 5000]
 # Then train with: bash train.sh
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -30,7 +31,7 @@ hash_file() {
 BEFORE=$(hash_file "$DATA")
 
 mkdir -p "$(dirname "$DATA")"
-"$PY" scripts/prep_dialog.py --out "$DATA" "$@"
+"$PY" scripts/prep_dialog_curated.py --out "$DATA" "$@"
 
 AFTER=$(hash_file "$DATA")
 if [ "$BEFORE" != "$AFTER" ]; then
