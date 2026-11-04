@@ -19,9 +19,10 @@ fi
 
 case "$MODE" in
   upload)
-    [ -f "$CKPT" ] || { echo "missing $CKPT (train first with bash train.sh)" >&2; exit 1; }
-    ASSETS=("$CKPT")
-    [ -f "$TOK" ] && ASSETS+=("$TOK")
+    [ -f "$CKPT" ] || { echo "ERROR: missing $CKPT (train first with bash train.sh)" >&2; exit 1; }
+    # Fail loudly: a release without the tokenizer cannot be used by chat.py or server.py.
+    [ -f "$TOK" ] || { echo "ERROR: missing $TOK (the tokenizer is required; train.py writes it on the first run)" >&2; exit 1; }
+    ASSETS=("$CKPT" "$TOK")
     if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
       echo "release $TAG exists, replacing assets"
       gh release upload "$TAG" "${ASSETS[@]}" --repo "$REPO" --clobber
@@ -34,6 +35,10 @@ case "$MODE" in
   download)
     mkdir -p out
     gh release download "$TAG" --repo "$REPO" --pattern "ckpt.pt" --pattern "tokenizer.json" --dir out --clobber
+    # Verify both files actually arrived, since the release may lack one of them.
+    for f in "$CKPT" "$TOK"; do
+      [ -s "$f" ] || { echo "ERROR: $f was not downloaded from release $TAG; the release may be missing it" >&2; exit 1; }
+    done
     echo "downloaded to out/"
     ;;
   *)
