@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Pip-Compact one-command launcher.
-#   - Installs requirements.txt if torch or numpy is missing.
-#   - Downloads TinyShakespeare to data/input.txt if the corpus is missing.
+#   - Installs requirements.txt if torch or numpy is missing (uses an active venv if one is set).
+#   - If data/input.txt is missing, runs download_chat_data.sh (curated UltraChat prep) automatically.
+#     If that fails, falls back to downloading TinyShakespeare so training can still start.
 #   - Uses CUDA when present (fp16 autocast); otherwise fp32 on CPU or MPS.
 #   - Auto-resumes from out/ckpt.pt when it exists.
 # Usage: bash train.sh [train.py flags, e.g. --steps 8000 --n_layer 12]
@@ -13,19 +14,34 @@ DATA_URL="https://raw.githubusercontent.com/karpathy/char-rnn/master/data/tinysh
 mkdir -p "$(dirname "$DATA")" out
 
 if [ -n "${PYTHON:-}" ]; then PY="$PYTHON"
+elif [ -n "${VIRTUAL_ENV:-}" ] && [ -x "$VIRTUAL_ENV/bin/python" ]; then PY="$VIRTUAL_ENV/bin/python"
 elif command -v python3 >/dev/null 2>&1; then PY=python3
 elif command -v python >/dev/null 2>&1; then PY=python
-else echo "ERROR: Python 3 not found." >&2; exit 1
+else echo "ERROR: Python 3 not found. Install Python 3 or set PYTHON=/path/to/python." >&2; exit 1
 fi
 
 if ! "$PY" -c "import torch, numpy" >/dev/null 2>&1; then
   echo "Installing dependencies from requirements.txt..."
-  "$PY" -m pip install -q -r requirements.txt
+  if ! "$PY" -m pip install -q -r requirements.txt; then
+    echo "ERROR: pip install failed. If your Python is externally managed, create a venv first:" >&2
+    echo "  python3 -m venv .venv && . .venv/bin/activate && bash train.sh" >&2
+    exit 1
+  fi
 fi
 
 if [ ! -s "$DATA" ]; then
-  echo "No corpus at $DATA. Downloading TinyShakespeare..."
-  curl -fsSL -o "$DATA" "$DATA_URL"
+  echo "No corpus at $DATA. Running dataset prep (download_chat_data.sh)..."
+  if PYTHON="$PY" DATA="$DATA" bash download_chat_data.sh; then
+    echo "Dataset prep finished."
+  else
+    echo "WARNING: dataset prep failed. Falling back to TinyShakespeare." >&2
+    curl -fsSL -o "$DATA" "$DATA_URL" || { echo "ERROR: could not download a corpus to $DATA." >&2; exit 1; }
+  fi
+fi
+
+if [ ! -s "$DATA" ]; then
+  echo "ERROR: corpus still missing at $DATA after dataset prep." >&2
+  exit 1
 fi
 
 DEVICE=$("$PY" -c "import torch; m = getattr(torch.backends, 'mps', None); print('cuda' if torch.cuda.is_available() else ('mps' if m and m.is_available() else 'cpu'))")
