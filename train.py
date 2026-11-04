@@ -389,7 +389,14 @@ def main():
         ck = torch.load(ckpt_path, map_location=device, weights_only=False)
         model.load_state_dict(ck["model"])
         opt.load_state_dict(ck["opt"])
-        scaler.load_state_dict(ck["scaler"])
+        # Only restore the GradScaler if the checkpoint actually holds its state.
+        # An empty/missing scaler state (e.g. saved without fp16) or a disabled scaler
+        # would otherwise raise "source state_dict is empty".
+        scaler_state = ck.get("scaler")
+        if scaler.is_enabled() and scaler_state:
+            scaler.load_state_dict(scaler_state)
+        else:
+            print("no GradScaler state in checkpoint; starting with a fresh scaler")
         start = ck["step"]
         print(f"resumed from step {start}")
 
