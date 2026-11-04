@@ -16,12 +16,18 @@ the chat history keeps the bare conversation.
 Usage:
     python chat.py
     python chat.py --ckpt out/ckpt.pt --tokenizer out/tokenizer.json --max_tokens 200
+    python chat.py --device cpu            # force CPU
     python chat.py --web --web_results 3
 
 Commands inside the loop: /reset clears history, /quit exits.
 """
+import faulthandler
+faulthandler.enable()  # a C-level crash now prints a Python traceback
+
 import argparse
 import codecs
+import os
+import sys
 from dataclasses import fields
 
 import torch
@@ -31,23 +37,60 @@ from train import Pip, Config, BPE
 STOP = "\nUser:"
 REPLACEMENT = "\ufffd"
 REP_WINDOW = 256  # only the most recent reply tokens are penalized
+DOWNLOAD_HINT = "run: bash scripts/upload_weights.sh download v0.1  (or train first with: bash train.sh)"
 
 
 def pick_device():
     return "cuda" if torch.cuda.is_available() else "cpu"
 
 
+def _cuda_usable():
+    """Allocate a tiny tensor on CUDA. Returns (ok, error_message).
+
+    Catches Python-level CUDA errors only; a true C-level crash is caught by faulthandler.
+    """
+    try:
+        t = torch.zeros(1, device="cuda")
+        torch.cuda.synchronize()
+        del t
+        return True, None
+    except Exception as e:
+        return False, f"{type(e).__name__}: {e}"
+
+
 def load(ckpt_path="out/ckpt.pt", tok_path="out/tokenizer.json", device=None):
-    """Return (model, tokenizer, device) ready for inference."""
+    """Return (model, tokenizer, device) ready for inference.
+
+    Prints each stage as [n/4] so a failure can be traced to the exact step.
+    Raises FileNotFoundError with a friendly message if a file is missing.
+    """
+    if not os.path.isfile(ckpt_path):
+        raise FileNotFoundError(f"checkpoint not found: {ckpt_path} ({DOWNLOAD_HINT})")
+    if not os.path.isfile(tok_path):
+        raise FileNotFoundError(f"tokenizer not found: {tok_path} ({DOWNLOAD_HINT})")
+
     device = device or pick_device()
+
+    print("[1/4] loading checkpoint...", flush=True)
     # mmap=False: torch.load's default mmap path segfaulted on WSL2.
     ck = torch.load(ckpt_path, map_location="cpu", weights_only=False, mmap=False)
+
+    print("[2/4] building model...", flush=True)
     known = {f.name for f in fields(Config)}
     cfg = Config(**{k: v for k, v in ck["cfg"].items() if k in known})
     model = Pip(cfg)
     model.load_state_dict(ck["model"])
     model.eval()
+
+    print(f"[3/4] moving to device ({device})...", flush=True)
+    if device == "cuda":
+        ok, err = _cuda_usable()
+        if not ok:
+            print(f"warning: CUDA check failed ({err}); falling back to CPU.", flush=True)
+            device = "cpu"
     model.to(device)
+
+    print("[4/4] loading tokenizer...", flush=True)
     tok = BPE.load(tok_path)
     if tok.n_vocab != cfg.vocab:
         raise ValueError(f"tokenizer vocab {tok.n_vocab} does not match checkpoint vocab {cfg.vocab}")
@@ -150,6 +193,8 @@ def main():
     ap = argparse.ArgumentParser(description="Chat with Pip-Compact in the terminal")
     ap.add_argument("--ckpt", default="out/ckpt.pt")
     ap.add_argument("--tokenizer", default="out/tokenizer.json")
+    ap.add_argument("--device", choices=["cuda", "cpu"], default=None,
+                    help="default: cuda if usable, else cpu")
     ap.add_argument("--max_tokens", type=int, default=200)
     ap.add_argument("--temp", type=float, default=0.8, help="0 = greedy")
     ap.add_argument("--top_k", type=int, default=40)
@@ -163,7 +208,16 @@ def main():
     if a.web:
         from web_search import fetch_context  # stdlib only; imported only when requested
 
-    model, tok, device = load(a.ckpt, a.tokenizer)
+    try:
+        model, tok, device = load(a.ckpt, a.tokenizer, a.device)
+    except FileNotFoundError as e:
+        print(f"error: {e}", file=sys.stderr)
+        sys.exit(1)
+    except (RuntimeError, ValueError) as e:
+        print(f"error while loading model: {e}", file=sys.stderr)
+        print("If this is a CUDA error, try: python chat.py --device cpu", file=sys.stderr)
+        sys.exit(1)
+
     n_params = sum(p.numel() for p in model.parameters()) / 1e6
     web_note = " Web search on." if a.web else ""
     print(f"Pip-Compact ({n_params:.1f}M params) on {device}.{web_note} /reset clears history, /quit exits.")
