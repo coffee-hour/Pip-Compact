@@ -40,7 +40,7 @@ def pick_device():
 def load(ckpt_path="out/ckpt.pt", tok_path="out/tokenizer.json", device=None):
     """Return (model, tokenizer, device) ready for inference."""
     device = device or pick_device()
-    ck = torch.load(ckpt_path, map_location=device, weights_only=False)
+    ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     known = {f.name for f in fields(Config)}
     cfg = Config(**{k: v for k, v in ck["cfg"].items() if k in known})
     model = Pip(cfg)
