@@ -5,7 +5,10 @@
 #     If that fails, falls back to downloading TinyShakespeare so training can still start.
 #   - Uses CUDA when present (fp16 autocast); otherwise fp32 on CPU or MPS.
 #   - Auto-resumes from out/ckpt.pt when it exists.
-# Usage: bash train.sh [train.py flags, e.g. --steps 8000 --n_layer 12]
+# Usage: bash train.sh [STEPS] [train.py flags, e.g. --steps 8000 --n_layer 12]
+#   bash train.sh 20000            same as --steps 20000 (total target step count)
+#   STEPS=20000 bash train.sh      same, via environment variable
+#   If the checkpoint is at step 5000 and the target is 20000, training continues from 5000 to 20000.
 set -euo pipefail
 cd "$(dirname "$0")"
 
@@ -47,8 +50,17 @@ fi
 DEVICE=$("$PY" -c "import torch; m = getattr(torch.backends, 'mps', None); print('cuda' if torch.cuda.is_available() else ('mps' if m and m.is_available() else 'cpu'))")
 echo "device: $DEVICE"
 
+# A bare leading integer is the total step target: `bash train.sh 20000` -> `--steps 20000`.
+if [[ "${1:-}" =~ ^[0-9]+$ ]]; then
+  set -- --steps "$1" "${@:2}"
+fi
 USER_ARGS=("$@")
 has_flag() { local f; for f in "${USER_ARGS[@]+"${USER_ARGS[@]}"}"; do [ "$f" = "$1" ] && return 0; done; return 1; }
+
+# STEPS env var is used only when no --steps flag was given.
+if [ -n "${STEPS:-}" ] && ! has_flag --steps; then
+  USER_ARGS+=(--steps "$STEPS")
+fi
 
 ARGS=()
 if [ "$DEVICE" = "cuda" ]; then
